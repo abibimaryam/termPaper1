@@ -268,8 +268,11 @@ basic_block=BasicBlockResnet(64, 64)
 print(basic_block)
 
 
-# Создаем случайный входной тензор с формой (batch_size, channels, height, width)
+
 x = torch.randn(1, 64, 32, 32)
+x = (x - x.min()) / (x.max() - x.min()) 
+x = x * 254 + 1  
+print(x)
 
 # Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -300,3 +303,11 @@ print("Средняя разница по модулю:", mean_diff.item())
 # mean_squared_diff = squared_diff.mean().item()
 
 # print(f"Mean Squared Error: {mean_squared_diff:.6f}")
+
+# Для out_basic
+mean_basic = torch.abs(out_basic).mean()
+print("Среднее значение по модулю для out_basic:", mean_basic.item())
+
+# Для out_transformer
+mean_transformer = torch.abs(out_transformer).mean()
+print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
