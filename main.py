@@ -111,32 +111,28 @@ print(len(test_data), len(test_loader))
 
 
 
+
 class TransformerConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, expansion=9):
+    def __init__(self, in_channels, out_channels, stride=1, num_heads=8):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.expansion = expansion  # 9 для ядра 3x3
-        
-        # Инициализация MHA
-        self.num_heads = self.expansion
-        self.head_dim = in_channels // self.num_heads
-        
-        # Проекции для MHA (Q, K, V)
-        self.W_Q = nn.Parameter(torch.randn(self.num_heads, in_channels, self.head_dim))
-        self.W_K = nn.Parameter(torch.randn(self.num_heads, in_channels, self.head_dim))
-        
-        # W_V будет заполнен весами из первой свёртки (Conv1)
-        self.W_V = nn.Parameter(torch.empty(self.num_heads, in_channels, self.head_dim))
-        
-        # Выходная проекция (инициализируется как единичная)
-        self.W_O = nn.Parameter(torch.eye(in_channels))
-        
-        # FFN для замены второй свёртки
-        self.ffn1 = nn.Linear(in_channels, in_channels * self.expansion)
-        self.ffn2 = nn.Linear(in_channels * self.expansion, out_channels)
-        
-        # Нормализация и shortcut connection
+        self.num_heads = num_heads
+
+        assert in_channels % num_heads == 0, "in_channels должно делиться на num_heads"
+        self.head_dim = in_channels // num_heads
+
+        # Проекции для MHA
+        self.W_Q = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
+        self.W_K = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
+        self.W_V = nn.Parameter(torch.empty(num_heads, in_channels, self.head_dim))
+        self.W_O = nn.Parameter(torch.randn(num_heads * self.head_dim, in_channels))
+
+        # FFN
+        self.ffn1 = nn.Linear(in_channels, out_channels)
+        self.ffn2 = nn.Linear(out_channels, out_channels)
+
+        # Нормализация и shortcut
         self.norm1 = nn.LayerNorm(in_channels)
         self.norm2 = nn.LayerNorm(out_channels)
         self.shortcut = nn.Sequential()
@@ -145,90 +141,80 @@ class TransformerConvBlock(nn.Module):
                 nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
                 nn.BatchNorm2d(out_channels)
             )
-        
-        # Инициализация весов
+
         self._init_weights()
 
     def _init_weights(self):
-        # Инициализация W_V и FFN будет выполнена после загрузки весов свёртки
         nn.init.uniform_(self.W_Q, -0.1, 0.1)
         nn.init.uniform_(self.W_K, -0.1, 0.1)
-        nn.init.eye_(self.W_O)
-        
-        # Инициализация FFN (остальные веса будут заполнены из Conv2)
+        nn.init.uniform_(self.W_V, -0.1, 0.1)
+        nn.init.xavier_uniform_(self.W_O)
         nn.init.zeros_(self.ffn1.bias)
         nn.init.zeros_(self.ffn2.bias)
-    
+
     def load_conv_weights(self, conv1, conv2):
-        """Загружает веса из свёрточных слоёв BasicBlock"""
-        # Преобразование весов Conv1 в W_V
         with torch.no_grad():
-            # Conv1: [out_ch, in_ch, 3, 3] -> разбиваем на 9 голов
-            conv1_weights = conv1.weight  # [C, C, 3, 3]
-            for i in range(3):
-                for j in range(3):
-                    head_idx = i * 3 + j
-                    self.W_V[head_idx] = conv1_weights[:, :, i, j][:, :self.head_dim]
+            conv1_weights = conv1.weight  # [C_out, C_in, 3, 3]
+            head_locations = [(i, j) for i in range(3) for j in range(3)]
+            selected_heads = head_locations[:self.num_heads]
             
-            # Conv2: [out_ch, in_ch, 3, 3] -> разворачиваем в FFN1
-            conv2_weights = conv2.weight  # [C, C, 3, 3]
+            for head_idx, (i, j) in enumerate(selected_heads):
+                patch = conv1_weights[:, :, i, j]  # [64, 64]
+                usable_dim = min(self.head_dim, patch.shape[1])
+                self.W_V[head_idx, :, :usable_dim] = patch[:, :usable_dim]
+
+            # FFN
+            conv2_weights = conv2.weight  # [64, 64, 3, 3]
             ffn1_weights = conv2_weights.permute(0, 2, 3, 1).contiguous().view(
                 self.in_channels * 9, self.in_channels
             ).t()  # [C, 9*C]
+            if ffn1_weights.shape[1] != self.ffn1.weight.shape[0]:
+                ffn1_weights = F.adaptive_avg_pool1d(ffn1_weights.unsqueeze(0), self.ffn1.weight.shape[0]).squeeze(0)
             self.ffn1.weight.data = ffn1_weights
-    
+
     def forward(self, x):
         identity = x
-        
-        # Применяем MHA
         B, C, H, W = x.shape
-        x = x.permute(0, 2, 3, 1)  # [B, H, W, C]
         
-        # Вычисляем Q, K, V
-        Q = torch.einsum('bhwc,hcd->bhwd', x, self.W_Q)  # [B, H, W, num_heads, head_dim]
-        K = torch.einsum('bhwc,hcd->bhwd', x, self.W_K)
-        V = torch.einsum('bhwc,hcd->bhwd', x, self.W_V)
+        # Attention part
+        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+        x_attn = torch.zeros_like(x_norm)
         
-        # Локальное внимание (окно 3x3)
-        x_out = torch.zeros_like(x)
-        for i in range(1, H-1):
-            for j in range(1, W-1):
-                # Соседи 3x3
-                neighbors = x[:, i-1:i+2, j-1:j+2, :]  # [B, 3, 3, C]
-                
-                # Вычисляем attention для текущей позиции
-                q = Q[:, i, j, :, :]  # [B, num_heads, head_dim]
-                k = K[:, i-1:i+2, j-1:j+2, :, :]  # [B, 3, 3, num_heads, head_dim]
-                k = k.reshape(B, 9, self.num_heads, self.head_dim)
-                
-                attn = torch.einsum('bhd,bnhd->bnh', q, k) / (self.head_dim ** 0.5)
-                attn = F.softmax(attn, dim=1)
-                
-                v = V[:, i-1:i+2, j-1:j+2, :, :]  # [B, 3, 3, num_heads, head_dim]
-                v = v.reshape(B, 9, self.num_heads, self.head_dim)
-                
-                out = torch.einsum('bnh,bnhd->bhd', attn, v)
-                out = torch.einsum('bhd,dc->bhc', out, self.W_O)
-                x_out[:, i, j, :] = out
+        # Reshape for attention
+        x_reshaped = x_norm.permute(0, 2, 3, 1).reshape(B * H * W, C)
         
-        x = x_out.permute(0, 3, 1, 2)  # [B, C, H, W]
-        x = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+        # Multi-head attention
+        Q = torch.matmul(x_reshaped, self.W_Q.reshape(-1, self.head_dim * self.num_heads))
+        K = torch.matmul(x_reshaped, self.W_K.reshape(-1, self.head_dim * self.num_heads))
+        V = torch.matmul(x_reshaped, self.W_V.reshape(-1, self.head_dim * self.num_heads))
+        
+        Q = Q.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)  # [B, heads, H, W, dim]
+        K = K.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)
+        V = V.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)
+        
+        # Attention scores (simplified)
+        attn_scores = torch.einsum('bnhwd,bmhwd->bnmhw', Q, K) / (self.head_dim ** 0.5)
+        attn_weights = F.softmax(attn_scores, dim=2)
+        x_attn = torch.einsum('bnmhw,bmhwd->bnhwd', attn_weights, V)
+        x_attn = x_attn.permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2)
+        
+        # Residual connection
+        x = x_norm + x_attn
         x = F.relu(x)
         
-        # Применяем FFN
-        x = x.permute(0, 2, 3, 1)  # [B, H, W, C]
-        x = self.ffn1(x)
-        x = F.relu(x)
-        x = self.ffn2(x)
-        x = x.permute(0, 3, 1, 2)  # [B, C_out, H, W]
+        # FFN part
+        x = x.permute(0, 2, 3, 1).reshape(-1, self.out_channels)
+        x = self.ffn2(F.relu(self.ffn1(x)))
+        x = x.reshape(B, H, W, self.out_channels).permute(0, 3, 1, 2)
+        
+        # Final normalization and residual
         x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
-        
-        # Shortcut connection
-        identity = self.shortcut(identity)
-        x += identity
+        x += self.shortcut(identity)
         x = F.relu(x)
         
         return x
+
     
 layer=TransformerConvBlock(in_channels=64,out_channels=64)
 layer.load_conv_weights(model.layer1[0].conv1, model.layer1[0].conv2)
@@ -282,21 +268,35 @@ basic_block=BasicBlockResnet(64, 64)
 print(basic_block)
 
 
-# # Создаем случайный входной тензор с формой (batch_size, channels, height, width)
-# x = torch.randn(1, 64, 32, 32)
+# Создаем случайный входной тензор с формой (batch_size, channels, height, width)
+x = torch.randn(1, 64, 32, 32)
 
-# # Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# x = x.to(device)
-# layer = layer.to(device)
-# basic_block = basic_block.to(device)
+# Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+x = x.to(device)
+layer = layer.to(device)
+basic_block = basic_block.to(device)
 
-# # Прогон через BasicBlock
-# with torch.no_grad():
-#     out_basic = basic_block(x)
-#     print("BasicBlock output shape:", out_basic.shape)
+# Прогон через BasicBlock
+with torch.no_grad():
+    out_basic = basic_block(x)
+    print("BasicBlock output shape:", out_basic.shape)
 
-# # Прогон через TransformerConvBlock
-# with torch.no_grad():
-#     out_transformer = layer(x)
-#     print("TransformerConvBlock output shape:", out_transformer.shape)
+# Прогон через TransformerConvBlock
+with torch.no_grad():
+    out_transformer = layer(x)
+    print("TransformerConvBlock output shape:", out_transformer.shape)
+
+
+
+#MAE
+diff = torch.abs(out_basic - out_transformer)
+mean_diff = diff.mean()
+
+print("Средняя разница по модулю:", mean_diff.item())
+
+# #MSE
+# squared_diff = torch.pow(out_basic - out_transformer, 2)
+# mean_squared_diff = squared_diff.mean().item()
+
+# print(f"Mean Squared Error: {mean_squared_diff:.6f}")
