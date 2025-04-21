@@ -21,8 +21,9 @@ import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import accuracy_score
 
-model = timm.create_model("resnet18_cifar100", pretrained=True)
+resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
 # print(model)
 
 # # Получаем веса из conv1 и conv2 внутри первого BasicBlock (layer1[0])
@@ -217,7 +218,7 @@ class TransformerConvBlock(nn.Module):
 
     
 layer=TransformerConvBlock(in_channels=64,out_channels=64)
-layer.load_conv_weights(model.layer1[0].conv1, model.layer1[0].conv2)
+layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
 print(layer)
 
 
@@ -311,3 +312,46 @@ print("Среднее значение по модулю для out_basic:", mea
 # Для out_transformer
 mean_transformer = torch.abs(out_transformer).mean()
 print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
+
+
+class TransformerModel(nn.Module):
+    def __init__(self):
+        super(TransformerModel, self).__init__()
+
+        self.layer1 = TransformerConvBlock(3, 64,num_heads=3)
+        self.fc1 = nn.Linear(64, 100)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = x.mean([2, 3]) 
+        x = self.fc1(x)
+        return x
+    
+model_transformer = TransformerModel().to(device)
+model_resnet=resnet_model.to(device)
+
+# Функция для оценки точности
+def evaluate(model, dataloader):
+    model.eval()
+    all_preds = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    accuracy = accuracy_score(all_labels, all_preds)
+    return accuracy
+
+
+# Оценка модели ResNet
+resnet_accuracy = evaluate(model_resnet, test_loader)
+print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
+
+# Оценка модели Transformer
+transformer_accuracy = evaluate(model_transformer, test_loader)
+print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
