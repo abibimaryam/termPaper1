@@ -311,6 +311,15 @@ print("Среднее значение по модулю для out_basic:", mea
 
 # Для out_transformer
 mean_transformer = torch.abs(out_transformer).mean()
+print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
+
+# каждый блок свой слой
+# сделать трансформер столько же слоев сколько в резнет 18 (8)
+# каждый слой должен соответсвовать своему блоку
+# инициализировать каждый слой весами соответсвующего блока
+# посчитать accuracy для трансформера и резнет
+# взять выход у резнета как есть и сравнить точности 
+# сравнить количество параметров
 
 class TransformerModel(nn.Module):
     def __init__(self, resnet):
@@ -325,8 +334,8 @@ class TransformerModel(nn.Module):
         )
 
         self.layer1 = self.make_layer(resnet.layer1,stride0=1,stride1=1)
-        self.layer2 = self.make_layer(resnet.layer2,stride0=2,stride1=1)
-        self.layer3 = self.make_layer(resnet.layer3,stride0=2,stride1=1)
+        self.layer2 = self.make_layer(resnet.layer2,stride0=1,stride1=1)
+        self.layer3 = self.make_layer(resnet.layer3,stride0=1,stride1=1)
         self.layer4 = self.make_layer(resnet.layer4,stride0=1,stride1=1)
 
         # Pooling + FC
@@ -336,14 +345,13 @@ class TransformerModel(nn.Module):
     def make_layer(self, resnet_layer,stride0,stride1):
         layers = []
         for idx, block in enumerate(resnet_layer):
-            print(idx)
             in_c = block.conv1.in_channels
-            out_c = block.conv2.out_channels
-            if idx == 0:
-                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride0)
+            out_c = block.conv2.out_channel
+            if idx==0:
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
             else:
-                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride1)
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
             layers.append(trans_block)
         return nn.Sequential(*layers)
