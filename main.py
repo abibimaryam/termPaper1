@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from sklearn.metrics import accuracy_score
 
 resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
-# print(model)
+print(resnet_model)
 
 # # Получаем веса из conv1 и conv2 внутри первого BasicBlock (layer1[0])
 # conv1_weights = model.layer1[0].conv1.weight
@@ -311,47 +311,82 @@ print("Среднее значение по модулю для out_basic:", mea
 
 # Для out_transformer
 mean_transformer = torch.abs(out_transformer).mean()
-print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
-
 
 class TransformerModel(nn.Module):
-    def __init__(self):
+    def __init__(self, resnet):
         super(TransformerModel, self).__init__()
+        
+        # начальный conv, bn, relu, maxpool
+        self.stem = nn.Sequential(
+            resnet.conv1,
+            resnet.bn1,
+            resnet.act1,
+            resnet.maxpool
+        )
 
-        self.layer1 = TransformerConvBlock(3, 64,num_heads=3)
-        self.fc1 = nn.Linear(64, 100)
+        self.layer1 = self.make_layer(resnet.layer1,stride0=1,stride1=1)
+        self.layer2 = self.make_layer(resnet.layer2,stride0=2,stride1=1)
+        self.layer3 = self.make_layer(resnet.layer3,stride0=2,stride1=1)
+        self.layer4 = self.make_layer(resnet.layer4,stride0=1,stride1=1)
+
+        # Pooling + FC
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512, 100)  # CIFAR-100
+
+    def make_layer(self, resnet_layer,stride0,stride1):
+        layers = []
+        for idx, block in enumerate(resnet_layer):
+            print(idx)
+            in_c = block.conv1.in_channels
+            out_c = block.conv2.out_channels
+            if idx == 0:
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride0)
+                trans_block.load_conv_weights(block.conv1, block.conv2)
+            else:
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride1)
+                trans_block.load_conv_weights(block.conv1, block.conv2)
+            layers.append(trans_block)
+        return nn.Sequential(*layers)
 
     def forward(self, x):
+        x = self.stem(x)
         x = self.layer1(x)
-        x = x.mean([2, 3]) 
-        x = self.fc1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
         return x
+
+
     
-model_transformer = TransformerModel().to(device)
-model_resnet=resnet_model.to(device)
+model_transformer = TransformerModel(resnet_model).to(device)
+print(model_transformer)
+# model_resnet=resnet_model.to(device)
 
-# Функция для оценки точности
-def evaluate(model, dataloader):
-    model.eval()
-    all_preds = []
-    all_labels = []
+# # Функция для оценки точности
+# def evaluate(model, dataloader):
+#     model.eval()
+#     all_preds = []
+#     all_labels = []
     
-    with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+#     with torch.no_grad():
+#         for inputs, labels in dataloader:
+#             inputs, labels = inputs.to(device), labels.to(device)
+#             outputs = model(inputs)
+#             _, preds = torch.max(outputs, 1)
+#             all_preds.extend(preds.cpu().numpy())
+#             all_labels.extend(labels.cpu().numpy())
     
-    accuracy = accuracy_score(all_labels, all_preds)
-    return accuracy
+#     accuracy = accuracy_score(all_labels, all_preds)
+#     return accuracy
 
 
-# Оценка модели ResNet
-resnet_accuracy = evaluate(model_resnet, test_loader)
-print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
+# # Оценка модели ResNet
+# resnet_accuracy = evaluate(model_resnet, test_loader)
+# print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
 
-# Оценка модели Transformer
-transformer_accuracy = evaluate(model_transformer, test_loader)
-print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
+# # Оценка модели Transformer
+# transformer_accuracy = evaluate(model_transformer, test_loader)
+# print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
