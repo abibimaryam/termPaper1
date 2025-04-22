@@ -117,7 +117,7 @@ class TransformerConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, num_heads=8):
         super().__init__()
         self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.out_channels = out_channels # Corrected to use out_channels
         self.num_heads = num_heads
 
         assert in_channels % num_heads == 0, "in_channels должно делиться на num_heads"
@@ -126,7 +126,7 @@ class TransformerConvBlock(nn.Module):
         # Проекции для MHA
         self.W_Q = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
         self.W_K = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
-        self.W_V = nn.Parameter(torch.empty(num_heads, in_channels, self.head_dim))
+        self.W_V = nn.Parameter(torch.empty(num_heads, self.out_channels, self.head_dim))
         self.W_O = nn.Parameter(torch.randn(num_heads * self.head_dim, in_channels))
 
         # FFN
@@ -166,11 +166,9 @@ class TransformerConvBlock(nn.Module):
 
             # FFN
             conv2_weights = conv2.weight  # [64, 64, 3, 3]
-            ffn1_weights = conv2_weights.permute(0, 2, 3, 1).contiguous().view(
-                self.in_channels * 9, self.in_channels
-            ).t()  # [C, 9*C]
-            if ffn1_weights.shape[1] != self.ffn1.weight.shape[0]:
-                ffn1_weights = F.adaptive_avg_pool1d(ffn1_weights.unsqueeze(0), self.ffn1.weight.shape[0]).squeeze(0)
+            ffn1_weights = conv2_weights.mean(dim=[2, 3]) # [C_out, C_in]
+            if ffn1_weights.shape[1] != self.ffn1.weight.shape[1] or ffn1_weights.shape[0] != self.ffn1.weight.shape[0]:
+                ffn1_weights = F.adaptive_avg_pool2d(ffn1_weights.unsqueeze(0), self.ffn1.weight.shape[:2]).squeeze(0)
             self.ffn1.weight.data = ffn1_weights
 
     def forward(self, x):
@@ -346,12 +344,12 @@ class TransformerModel(nn.Module):
         layers = []
         for idx, block in enumerate(resnet_layer):
             in_c = block.conv1.in_channels
-            out_c = block.conv2.out_channel
+            out_c = block.conv2.out_channels
             if idx==0:
-                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8)
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride0)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
             else:
-                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8)
+                trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride1)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
             layers.append(trans_block)
         return nn.Sequential(*layers)
