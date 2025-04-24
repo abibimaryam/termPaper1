@@ -117,7 +117,7 @@ class TransformerConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, num_heads=8):
         super().__init__()
         self.in_channels = in_channels
-        self.out_channels = out_channels # Corrected to use out_channels
+        self.out_channels = out_channels 
         self.num_heads = num_heads
 
         assert in_channels % num_heads == 0, "in_channels должно делиться на num_heads"
@@ -126,7 +126,7 @@ class TransformerConvBlock(nn.Module):
         # Проекции для MHA
         self.W_Q = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
         self.W_K = nn.Parameter(torch.randn(num_heads, in_channels, self.head_dim))
-        self.W_V = nn.Parameter(torch.empty(num_heads, self.out_channels, self.head_dim))
+        self.W_V = nn.Parameter(torch.empty(num_heads, in_channels, self.head_dim))
         self.W_O = nn.Parameter(torch.randn(num_heads * self.head_dim, in_channels))
 
         # FFN
@@ -160,12 +160,12 @@ class TransformerConvBlock(nn.Module):
             selected_heads = head_locations[:self.num_heads]
             
             for head_idx, (i, j) in enumerate(selected_heads):
-                patch = conv1_weights[:, :, i, j]  # [64, 64]
+                patch = conv1_weights[:, :, i, j]  # [C_out, C_in]
                 usable_dim = min(self.head_dim, patch.shape[1])
                 self.W_V[head_idx, :, :usable_dim] = patch[:, :usable_dim]
 
             # FFN
-            conv2_weights = conv2.weight  # [64, 64, 3, 3]
+            conv2_weights = conv2.weight  # [C_out, C_in, 3, 3]
             ffn1_weights = conv2_weights.mean(dim=[2, 3]) # [C_out, C_in]
             if ffn1_weights.shape[1] != self.ffn1.weight.shape[1] or ffn1_weights.shape[0] != self.ffn1.weight.shape[0]:
                 ffn1_weights = F.adaptive_avg_pool2d(ffn1_weights.unsqueeze(0), self.ffn1.weight.shape[:2]).squeeze(0)
@@ -176,14 +176,14 @@ class TransformerConvBlock(nn.Module):
         B, C, H, W = x.shape
         
         # Attention part
-        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) #[B,H,W,C]
         x_attn = torch.zeros_like(x_norm)
         
         # Reshape for attention
-        x_reshaped = x_norm.permute(0, 2, 3, 1).reshape(B * H * W, C)
+        x_reshaped = x_norm.permute(0, 2, 3, 1).reshape(B * H * W, C) #[B*H*W, C]
         
         # Multi-head attention
-        Q = torch.matmul(x_reshaped, self.W_Q.reshape(-1, self.head_dim * self.num_heads))
+        Q = torch.matmul(x_reshaped, self.W_Q.reshape(-1, self.head_dim * self.num_heads)) #[B*H*W, C] * [C , self.head_dim * self.num_heads]
         K = torch.matmul(x_reshaped, self.W_K.reshape(-1, self.head_dim * self.num_heads))
         V = torch.matmul(x_reshaped, self.W_V.reshape(-1, self.head_dim * self.num_heads))
         
@@ -195,27 +195,26 @@ class TransformerConvBlock(nn.Module):
         attn_scores = torch.einsum('bnhwd,bmhwd->bnmhw', Q, K) / (self.head_dim ** 0.5)
         attn_weights = F.softmax(attn_scores, dim=2)
         x_attn = torch.einsum('bnmhw,bmhwd->bnhwd', attn_weights, V)
-        x_attn = x_attn.permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
-        x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2)
+        x_attn = x_attn.permute(0, 2, 3, 1, 4).reshape(B, H, W, -1) #[B, H, W, num_heads * head_dim]
+        x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2) #  [B, H, W, num_heads * head_dim] *  [num_heads * head_dim, out_channels] = [B, H, W, out_channels] = [B,out_channels,H,W]
         
         # Residual connection
         x = x_norm + x_attn
         x = F.relu(x)
         
         # FFN part
-        x = x.permute(0, 2, 3, 1).reshape(-1, self.out_channels)
+        x = x.permute(0, 2, 3, 1).reshape(-1, self.out_channels)  #[B, H, W, out_channels]
         x = self.ffn2(F.relu(self.ffn1(x)))
         x = x.reshape(B, H, W, self.out_channels).permute(0, 3, 1, 2)
         
         # Final normalization and residual
-        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) #[B, out_channels, H, W].
         x += self.shortcut(identity)
         x = F.relu(x)
         
         return x
 
-    
-layer=TransformerConvBlock(in_channels=64,out_channels=64)
+layer=TransformerConvBlock(in_channels=64,out_channels=128,stride=2)
 layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
 print(layer)
 
@@ -332,8 +331,8 @@ class TransformerModel(nn.Module):
         )
 
         self.layer1 = self.make_layer(resnet.layer1,stride0=1,stride1=1)
-        self.layer2 = self.make_layer(resnet.layer2,stride0=1,stride1=1)
-        self.layer3 = self.make_layer(resnet.layer3,stride0=1,stride1=1)
+        self.layer2 = self.make_layer(resnet.layer2,stride0=2,stride1=1)
+        self.layer3 = self.make_layer(resnet.layer3,stride0=2,stride1=1)
         self.layer4 = self.make_layer(resnet.layer4,stride0=1,stride1=1)
 
         # Pooling + FC
@@ -396,3 +395,12 @@ print(model_transformer)
 # # Оценка модели Transformer
 # transformer_accuracy = evaluate(model_transformer, test_loader)
 # print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
+
+y = torch.randn(1, 3, 32, 32)
+y = (y - y.min()) / (y.max() - y.min()) 
+y = y * 254 + 1  
+y = y.to(device)
+print(y)
+with torch.no_grad():
+    out_transformer = model_transformer(y)
+    print("TransformerConvBlock output shape:", out_transformer.shape)
