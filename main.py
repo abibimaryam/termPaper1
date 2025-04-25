@@ -130,8 +130,9 @@ class TransformerConvBlock(nn.Module):
         self.W_O = nn.Parameter(torch.randn(num_heads * self.head_dim, in_channels))
 
         # FFN
-        self.ffn1 = nn.Linear(in_channels, out_channels)
-        self.ffn2 = nn.Linear(out_channels, out_channels)
+        hidden_dim = out_channels * 4 # Define hidden dimension
+        self.ffn1 = nn.Linear(out_channels, hidden_dim)
+        self.ffn2 = nn.Linear(hidden_dim, out_channels)
 
         # Нормализация и shortcut
         self.norm1 = nn.LayerNorm(in_channels)
@@ -162,7 +163,8 @@ class TransformerConvBlock(nn.Module):
             for head_idx, (i, j) in enumerate(selected_heads):
                 patch = conv1_weights[:, :, i, j]  # [C_out, C_in]
                 usable_dim = min(self.head_dim, patch.shape[1])
-                self.W_V[head_idx, :, :usable_dim] = patch[:, :usable_dim]
+                self.W_V[head_idx, :, :usable_dim] = patch.T[:self.in_channels, :usable_dim]
+
 
             # FFN
             conv2_weights = conv2.weight  # [C_out, C_in, 3, 3]
@@ -201,19 +203,19 @@ class TransformerConvBlock(nn.Module):
         # Residual connection
         x = x_norm + x_attn
         x = F.relu(x)
-        
+
         # FFN part
-        x = x.permute(0, 2, 3, 1).reshape(-1, 64)   #[B, H, W, out_channels]
-        
-        
-        # Применяем ffn1 и ffn2
-        x = self.ffn1(x)  
-        print("После ffn1:", x.shape)
+        # x is [B, out_channels, H, W] here after attention and relu.
+        x = x.permute(0, 2, 3, 1) # Shape [B, H, W, out_channels]
+
+        # Apply FFN to the last dimension (out_channels)
+        x = self.ffn1(x) # Shape [B, H, W, hidden_dim]
         x = F.relu(x)
-        x = self.ffn2(x) 
-        
-        x = x.reshape(B, H, W, self.out_channels).permute(0, 3, 1, 2) #B, H, W, out_channels]
-        
+        x = self.ffn2(x) # Shape [B, H, W, out_channels]
+
+        # Permute back to [B, out_channels, H, W]
+        x = x.permute(0, 3, 1, 2)
+
         # Final normalization and residual
         x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)  #[B, out_channels, H, W]
         x += self.shortcut(identity)
@@ -272,8 +274,8 @@ class TransformerConvBlock(nn.Module):
     #     return x
 
 
-layer=TransformerConvBlock(in_channels=64,out_channels=128,stride=2)
-layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
+layer=TransformerConvBlock(in_channels=128,out_channels=128,stride=1)
+layer.load_conv_weights(resnet_model.layer2[1].conv1, resnet_model.layer2[1].conv2)
 print(layer)
 
 
@@ -328,12 +330,12 @@ class BasicBlockResnet(nn.Module):
         return out
     
 
-basic_block=BasicBlockResnet(64, 128,stride=2)
-print(basic_block)
+basic_block=BasicBlockResnet(128, 128,stride=1)
+# print(basic_block)
 
 
 
-x = torch.randn(1, 64, 32, 32)
+x = torch.randn(1, 128, 32, 32)
 x = (x - x.min()) / (x.max() - x.min()) 
 x = x * 254 + 1  
 print(x)
@@ -413,18 +415,24 @@ class TransformerModel(nn.Module):
             if idx==0:
                 trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride0)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
-            else:
+            elif idx==1:
                 trans_block = TransformerConvBlock(in_c, out_c, num_heads=8,stride=stride1)
                 trans_block.load_conv_weights(block.conv1, block.conv2)
             layers.append(trans_block)
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        print(f"{x.shape}")
         x = self.stem(x)
+        print(f"0 {x.shape}")
         x = self.layer1(x)
+        print(f"1 {x.shape}")
         x = self.layer2(x)
+        print(f"2 {x.shape}")
         x = self.layer3(x)
+        print(f"3 {x.shape}")
         x = self.layer4(x)
+        print(f"4 {x.shape}")
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
@@ -434,7 +442,7 @@ class TransformerModel(nn.Module):
     
 model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
-# model_resnet=resnet_model.to(device)
+model_resnet=resnet_model.to(device)
 
 # # Функция для оценки точности
 # def evaluate(model, dataloader):
@@ -462,11 +470,11 @@ print(model_transformer)
 # transformer_accuracy = evaluate(model_transformer, test_loader)
 # print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
 
-# y = torch.randn(1, 3, 32, 32)
-# y = (y - y.min()) / (y.max() - y.min()) 
-# y = y * 254 + 1  
-# y = y.to(device)
-# print(y)
-# with torch.no_grad():
-#     out_transformer = model_transformer(y)
-#     print("TransformerConvBlock output shape:", out_transformer.shape)
+y = torch.randn(1, 3, 32, 32)
+y = (y - y.min()) / (y.max() - y.min()) 
+y = y * 254 + 1  
+y = y.to(device)
+print(y)
+with torch.no_grad():
+    out_transformer = model_transformer(y)
+    print("TransformerConvBlock output shape:", out_transformer.shape)
