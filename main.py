@@ -422,17 +422,11 @@ class TransformerModel(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        print(f"{x.shape}")
         x = self.stem(x)
-        print(f"0 {x.shape}")
         x = self.layer1(x)
-        print(f"1 {x.shape}")
         x = self.layer2(x)
-        print(f"2 {x.shape}")
         x = self.layer3(x)
-        print(f"3 {x.shape}")
         x = self.layer4(x)
-        print(f"4 {x.shape}")
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
@@ -444,37 +438,48 @@ model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
 model_resnet=resnet_model.to(device)
 
-# # Функция для оценки точности
-# def evaluate(model, dataloader):
-#     model.eval()
-#     all_preds = []
-#     all_labels = []
+
+
+# y = torch.randn(1, 3, 32, 32)
+# y = (y - y.min()) / (y.max() - y.min()) 
+# y = y * 254 + 1  
+# y = y.to(device)
+# print(y)
+# with torch.no_grad():
+#     out_transformer = model_transformer(y)
+#     print("TransformerConvBlock output shape:", out_transformer.shape)
+
+
+# Функция для оценки точности
+def evaluate(model, dataloader):
+    model.eval()
+    all_preds = []
+    all_labels = []
     
-#     with torch.no_grad():
-#         for inputs, labels in dataloader:
-#             inputs, labels = inputs.to(device), labels.to(device)
-#             outputs = model(inputs)
-#             _, preds = torch.max(outputs, 1)
-#             all_preds.extend(preds.cpu().numpy())
-#             all_labels.extend(labels.cpu().numpy())
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
     
-#     accuracy = accuracy_score(all_labels, all_preds)
-#     return accuracy
+    accuracy = accuracy_score(all_labels, all_preds)
+    return accuracy
 
 
-# # Оценка модели ResNet
-# resnet_accuracy = evaluate(model_resnet, test_loader)
-# print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
+# Оценка модели ResNet
+resnet_accuracy = evaluate(model_resnet, test_loader)
+print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
 
-# # Оценка модели Transformer
-# transformer_accuracy = evaluate(model_transformer, test_loader)
-# print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
+# Оценка модели Transformer
+transformer_accuracy = evaluate(model_transformer, test_loader)
+print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
 
-y = torch.randn(1, 3, 32, 32)
-y = (y - y.min()) / (y.max() - y.min()) 
-y = y * 254 + 1  
-y = y.to(device)
-print(y)
-with torch.no_grad():
-    out_transformer = model_transformer(y)
-    print("TransformerConvBlock output shape:", out_transformer.shape)
+
+
+
+# # #Train the Transformer model
+# # print("Starting Transformer model training...")
+# # train_model(model_transformer, train_loader, criterion, optimizer, device, epochs=epochs)
+# # print("Transformer model training finished.")
