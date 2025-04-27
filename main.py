@@ -130,9 +130,9 @@ class TransformerConvBlock(nn.Module):
         self.W_O = nn.Parameter(torch.randn(num_heads * self.head_dim, in_channels))
 
         # FFN
-        hidden_dim = out_channels * 4 # Define hidden dimension
-        self.ffn1 = nn.Linear(out_channels, hidden_dim)
-        self.ffn2 = nn.Linear(hidden_dim, out_channels)
+        hidden_dim = self.in_channels * 4 # Define hidden dimension, based on input channels
+        self.ffn1 = nn.Linear(self.in_channels, hidden_dim)
+        self.ffn2 = nn.Linear(hidden_dim, self.out_channels)
 
         # Нормализация и shortcut
         self.norm1 = nn.LayerNorm(in_channels)
