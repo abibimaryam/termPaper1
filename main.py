@@ -424,62 +424,90 @@ class TransformerModel(nn.Module):
     def forward(self, x):
         x = self.stem(x)
         x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        # x = self.layer2(x)
+        # x = self.layer3(x)
+        # x = self.layer4(x)
+        # x = self.avgpool(x)
+        # x = torch.flatten(x, 1)
+        # x = self.fc(x)
         return x
+
 
 
     
 model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
+
+resnet_model = nn.Sequential(
+    resnet_model.conv1,
+    resnet_model.bn1,
+    resnet_model.act1,
+    resnet_model.maxpool,
+    resnet_model.layer1
+)
+
 model_resnet=resnet_model.to(device)
 
 
 
-# y = torch.randn(1, 3, 32, 32)
-# y = (y - y.min()) / (y.max() - y.min()) 
-# y = y * 254 + 1  
-# y = y.to(device)
+
+y = torch.randn(1, 3, 32, 32)
+y = (y - y.min()) / (y.max() - y.min()) 
+y = y * 254 + 1  
+y = y.to(device)
 # print(y)
-# with torch.no_grad():
-#     out_transformer = model_transformer(y)
-#     print("TransformerConvBlock output shape:", out_transformer.shape)
+with torch.no_grad():
+    out_transformer = model_transformer(y)
+    # print("TransformerConvBlock output shape:", out_transformer.shape)
 
-
-# Функция для оценки точности
-def evaluate(model, dataloader):
-    model.eval()
-    all_preds = []
-    all_labels = []
+with torch.no_grad():
+    out_resnet = resnet_model(y)
     
-    with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+
+# #MAE
+# diff = torch.abs(out_resnet - out_transformer)
+# mean_diff = diff.mean()
+# print(mean_diff)
+
+# print("Средняя разница по модулю:", mean_diff.item())
+
+# #MSE
+# squared_diff = torch.pow(out_basic - out_transformer, 2)
+# mean_squared_diff = squared_diff.mean().item()
+
+# print(f"Mean Squared Error: {mean_squared_diff:.6f}")
+
+# Для out_basic
+mean_basic = torch.abs(out_resnet).mean()
+print("Среднее значение по модулю для out_resnet:", mean_basic.item())
+
+# Для out_transformer
+mean_transformer = torch.abs(out_transformer).mean()
+print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
+
+
+# # Функция для оценки точности
+# def evaluate(model, dataloader):
+#     model.eval()
+#     all_preds = []
+#     all_labels = []
     
-    accuracy = accuracy_score(all_labels, all_preds)
-    return accuracy
+#     with torch.no_grad():
+#         for inputs, labels in dataloader:
+#             inputs, labels = inputs.to(device), labels.to(device)
+#             outputs = model(inputs)
+#             _, preds = torch.max(outputs, 1)
+#             all_preds.extend(preds.cpu().numpy())
+#             all_labels.extend(labels.cpu().numpy())
+    
+#     accuracy = accuracy_score(all_labels, all_preds)
+#     return accuracy
 
 
-# Оценка модели ResNet
-resnet_accuracy = evaluate(model_resnet, test_loader)
-print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
+# # Оценка модели ResNet
+# resnet_accuracy = evaluate(model_resnet, test_loader)
+# print(f"ResNet Accuracy: {resnet_accuracy * 100:.2f}%")
 
-# Оценка модели Transformer
-transformer_accuracy = evaluate(model_transformer, test_loader)
-print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
-
-
-
-
-# # #Train the Transformer model
-# # print("Starting Transformer model training...")
-# # train_model(model_transformer, train_loader, criterion, optimizer, device, epochs=epochs)
-# # print("Transformer model training finished.")
+# # Оценка модели Transformer
+# transformer_accuracy = evaluate(model_transformer, test_loader)
+# print(f"Transformer Accuracy: {transformer_accuracy * 100:.2f}%")
