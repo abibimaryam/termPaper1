@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from sklearn.metrics import accuracy_score
 
 resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
-print(resnet_model)
+# print(resnet_model)
 
 # # Получаем веса из conv1 и conv2 внутри первого BasicBlock (layer1[0])
 # conv1_weights = model.layer1[0].conv1.weight
@@ -225,58 +225,11 @@ class TransformerConvBlock(nn.Module):
 
 
 
-
-    # def forward(self, x):
-    #     identity = x
-    #     B, C, H, W = x.shape
-        
-    #     # Attention part
-    #     x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) #[B,H,W,C]
-    #     x_attn = torch.zeros_like(x_norm)
-        
-    #     # Reshape for attention
-    #     x_reshaped = x_norm.permute(0, 2, 3, 1).reshape(B * H * W, C) #[B*H*W, C]
-        
-    #     # Multi-head attention
-    #     Q = torch.matmul(x_reshaped, self.W_Q.reshape(-1, self.head_dim * self.num_heads)) #[B*H*W, C] * [C , self.head_dim * self.num_heads] = [B * H * W, num_heads * head_dim]
-    #     K = torch.matmul(x_reshaped, self.W_K.reshape(-1, self.head_dim * self.num_heads))
-    #     V = torch.matmul(x_reshaped, self.W_V.reshape(-1, self.head_dim * self.num_heads))
-        
-    #     Q = Q.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)  # [B, num_heads H, W, head_dim]
-    #     K = K.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)
-    #     V = V.view(B, H, W, self.num_heads, self.head_dim).permute(0, 3, 1, 2, 4)
-        
-    #     # Attention scores (simplified)
-    #     attn_scores = torch.einsum('bnhwd,bmhwd->bnmhw', Q, K) / (self.head_dim ** 0.5)
-    #     attn_weights = F.softmax(attn_scores, dim=2)
-    #     x_attn = torch.einsum('bnmhw,bmhwd->bnhwd', attn_weights, V)
-    #     x_attn = x_attn.permute(0, 2, 3, 1, 4).reshape(B, H, W, -1) #[B, H, W, num_heads * head_dim]
-    #     x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2) #  [B, H, W, num_heads * head_dim] *  [num_heads * head_dim, out_channels] = [B, H, W, out_channels] = [B,out_channels,H,W]
-        
-    #     # Residual connection
-    #     x = x_norm + x_attn
-    #     x = F.relu(x)
-        
-    #     # FFN part
-    #     x = x.permute(0, 2, 3, 1).reshape(-1, self.out_channels)  #[B, H, W, out_channels]
-    #     print("ffn1 weights shape:", self.ffn1.weight.shape)
-    #     print("ffn2 weights shape:", self.ffn2.weight.shape)
-    #     x = self.ffn2(F.relu(self.ffn1(x)))
-    #     print("ffn1 weights shape:", self.ffn1.weight.shape)
-    #     print("ffn2 weights shape:", self.ffn2.weight.shape)
-    #     x = x.reshape(B, H, W, self.out_channels).permute(0, 3, 1, 2)
-        
-    #     # Final normalization and residual
-    #     x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) #[B, out_channels, H, W].
-    #     x += self.shortcut(identity)
-    #     x = F.relu(x)
-        
-    #     return x
-
-
-layer=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
-layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
-print(layer)
+block1=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
+block1.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
+block2=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
+block2.load_conv_weights(resnet_model.layer1[1].conv1, resnet_model.layer1[1].conv2)
+# print(block1)
 
 
 # бэсик блок 
@@ -287,53 +240,53 @@ print(layer)
 # и оно должно  быть близко к нулю
 
 
-class BasicBlockResnet(nn.Module):
+# class BasicBlockResnet(nn.Module):
 
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
-        super(BasicBlockResnet, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3,
-                               stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
+#     def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+#         super(BasicBlockResnet, self).__init__()
+#         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3,
+#                                stride=stride, padding=1, bias=False)
+#         self.bn1 = nn.BatchNorm2d(out_channels)
+#         self.relu = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
-                               stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
+#         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
+#                                stride=1, padding=1, bias=False)
+#         self.bn2 = nn.BatchNorm2d(out_channels)
 
-        self.downsample = downsample
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
-            )
-        else:
-            self.shortcut = None
+#         self.downsample = downsample
+#         if stride != 1 or in_channels != out_channels:
+#             self.shortcut = nn.Sequential(
+#                 nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+#                 nn.BatchNorm2d(out_channels)
+#             )
+#         else:
+#             self.shortcut = None
 
-    def forward(self, x):
-        identity = x
+#     def forward(self, x):
+#         identity = x
 
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
+#         out = self.conv1(x)
+#         out = self.bn1(out)
+#         out = self.relu(out)
 
-        out = self.conv2(out)
-        out = self.bn2(out)
+#         out = self.conv2(out)
+#         out = self.bn2(out)
 
-        if self.downsample is not None:
-            identity = self.downsample(x)
-        elif self.shortcut is not None:
-            identity = self.shortcut(x)
+#         if self.downsample is not None:
+#             identity = self.downsample(x)
+#         elif self.shortcut is not None:
+#             identity = self.shortcut(x)
 
-        out += identity
-        out = self.relu(out)
+#         out += identity
+#         out = self.relu(out)
 
-        return out
+#         return out
     
 
-basic_block=BasicBlockResnet(64, 64,stride=1)
-# print(basic_block)
+# basic_block=BasicBlockResnet(64, 64,stride=1)
 
-
+basic_block=resnet_model.layer1
+print(basic_block)
 
 x = torch.randn(1, 64, 32, 32)
 x = (x - x.min()) / (x.max() - x.min()) 
@@ -343,7 +296,8 @@ print(x)
 # Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 x = x.to(device)
-layer = layer.to(device)
+block1 = block1.to(device)
+block2=block2.to(device)
 basic_block = basic_block.to(device)
 
 # Прогон через BasicBlock
@@ -353,16 +307,17 @@ with torch.no_grad():
 
 # Прогон через TransformerConvBlock
 with torch.no_grad():
-    out_transformer = layer(x)
+    out_transformer = block1(x)
+    out_transformer=block2(out_transformer)
     print("TransformerConvBlock output shape:", out_transformer.shape)
 
 
 
-# #MAE
-# diff = torch.abs(out_basic - out_transformer)
-# mean_diff = diff.mean()
+#MAE
+diff = torch.abs(out_basic - out_transformer)
+mean_diff = diff.mean()
 
-# print("Средняя разница по модулю:", mean_diff.item())
+print("Средняя разница по модулю:", mean_diff.item())
 
 # #MSE
 # squared_diff = torch.pow(out_basic - out_transformer, 2)
@@ -422,7 +377,7 @@ class TransformerModel(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.stem(x)
+        # x = self.stem(x)
         x = self.layer1(x)
         # x = self.layer2(x)
         # x = self.layer3(x)
@@ -439,11 +394,15 @@ model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
 
 resnet_model = nn.Sequential(
-    resnet_model.conv1,
-    resnet_model.bn1,
-    resnet_model.act1,
-    resnet_model.maxpool,
-    resnet_model.layer1
+    # resnet_model.conv1,
+    # resnet_model.bn1,
+    # resnet_model.act1,
+    # resnet_model.maxpool,
+    resnet_model.layer1,
+    # resnet_model.layer2,
+    # resnet_model.layer3,
+    # resnet_model.layer4,
+
 )
 
 model_resnet=resnet_model.to(device)
@@ -457,19 +416,18 @@ y = y * 254 + 1
 y = y.to(device)
 # print(y)
 with torch.no_grad():
-    out_transformer = model_transformer(y)
+    out_transformer = model_transformer(x)
     # print("TransformerConvBlock output shape:", out_transformer.shape)
 
 with torch.no_grad():
-    out_resnet = resnet_model(y)
+    out_resnet = resnet_model(x)
     
 
-# #MAE
-# diff = torch.abs(out_resnet - out_transformer)
-# mean_diff = diff.mean()
-# print(mean_diff)
-
-# print("Средняя разница по модулю:", mean_diff.item())
+#MAE
+diff = torch.abs(out_resnet - out_transformer)
+mean_diff = diff.mean()
+print(mean_diff)
+print("Средняя разница по модулю:", mean_diff.item())
 
 # #MSE
 # squared_diff = torch.pow(out_basic - out_transformer, 2)
