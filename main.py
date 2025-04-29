@@ -274,8 +274,8 @@ class TransformerConvBlock(nn.Module):
     #     return x
 
 
-layer=TransformerConvBlock(in_channels=128,out_channels=128,stride=1)
-layer.load_conv_weights(resnet_model.layer2[1].conv1, resnet_model.layer2[1].conv2)
+layer=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
+layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
 print(layer)
 
 
@@ -330,12 +330,12 @@ class BasicBlockResnet(nn.Module):
         return out
     
 
-basic_block=BasicBlockResnet(128, 128,stride=1)
+basic_block=BasicBlockResnet(64, 64,stride=1)
 # print(basic_block)
 
 
 
-x = torch.randn(1, 128, 32, 32)
+x = torch.randn(1, 64, 32, 32)
 x = (x - x.min()) / (x.max() - x.min()) 
 x = x * 254 + 1  
 print(x)
