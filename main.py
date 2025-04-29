@@ -135,12 +135,12 @@ class TransformerConvBlock(nn.Module):
         self.ffn2 = nn.Linear(hidden_dim, self.out_channels)
 
         # Нормализация и shortcut
-        self.norm1 = nn.LayerNorm(in_channels)
-        self.norm2 = nn.LayerNorm(out_channels)
+        self.norm1 = nn.BatchNorm2d(in_channels)
+        self.norm2 = nn.BatchNorm2d(out_channels)
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1),
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
                 nn.BatchNorm2d(out_channels)
             )
 
@@ -178,11 +178,13 @@ class TransformerConvBlock(nn.Module):
         B, C, H, W = x.shape
         
         # Attention part
-        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)  #[B, H, W, C]
-        x_attn = torch.zeros_like(x_norm)
-        
+        # Apply norm1 correctly to [B, C, H, W]
+        x_norm = self.norm1(x)
+        # Permute for attention calculations
+        x_permuted_for_attn = x_norm.permute(0, 2, 3, 1) #[B, H, W, C]
+
         # Reshape for attention
-        x_reshaped = x_norm.permute(0, 2, 3, 1).reshape(B * H * W, C)  #[B*H*W, C]
+        x_reshaped = x_permuted_for_attn.reshape(B * H * W, C)  #[B*H*W, C]
         
         # Multi-head attention
         Q = torch.matmul(x_reshaped, self.W_Q.reshape(-1, self.head_dim * self.num_heads))  #[B*H*W, C] * [C , self.head_dim * self.num_heads] = [B*H*W, num_heads * head_dim]
@@ -217,10 +219,11 @@ class TransformerConvBlock(nn.Module):
         x = x.permute(0, 3, 1, 2)
 
         # Final normalization and residual
-        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)  #[B, out_channels, H, W]
+        # Apply norm2 correctly to [B, out_channels, H, W]
+        x = self.norm2(x)
         x += self.shortcut(identity)
         x = F.relu(x)
-        
+
         return x
 
 
@@ -358,11 +361,11 @@ with torch.no_grad():
 
 
 
-# #MAE
-# diff = torch.abs(out_basic - out_transformer)
-# mean_diff = diff.mean()
+#MAE
+diff = torch.abs(out_basic - out_transformer)
+mean_diff = diff.mean()
 
-# print("Средняя разница по модулю:", mean_diff.item())
+print("Средняя разница по модулю:", mean_diff.item())
 
 # #MSE
 # squared_diff = torch.pow(out_basic - out_transformer, 2)
