@@ -34,7 +34,7 @@ print(resnet_model)
 
 
 
-device = 'cuda'
+device = 'cpu'
 seed = 42
 batch_size = 64
 epochs = 50
@@ -135,13 +135,14 @@ class TransformerConvBlock(nn.Module):
         self.ffn2 = nn.Linear(hidden_dim, self.out_channels)
 
         # Нормализация и shortcut
-        self.norm1 = nn.BatchNorm2d(in_channels)
-        self.norm2 = nn.BatchNorm2d(out_channels)
+
+        self.norm1 = nn.LayerNorm(in_channels, elementwise_affine=False)
+        self.norm2 = nn.LayerNorm(out_channels,elementwise_affine=False)
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
-                nn.BatchNorm2d(out_channels)
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1),
+                nn.BatchNorm2d(out_channels,affine=False,track_running_stats=False)
             )
 
         self._init_weights()
@@ -174,6 +175,7 @@ class TransformerConvBlock(nn.Module):
             self.ffn1.weight.data = ffn1_weights
 
     def forward(self, x):
+        x=x*1000000
         identity = x
         B, C, H, W = x.shape
         
@@ -224,7 +226,8 @@ class TransformerConvBlock(nn.Module):
         x += self.shortcut(identity)
         x = F.relu(x)
 
-        return x
+        return x//1000000
+
 
 
 
@@ -337,10 +340,19 @@ basic_block=BasicBlockResnet(64, 64,stride=1)
 # print(basic_block)
 
 
+basic_block=resnet_model.layer1
+for name,child in basic_block.named_children():
+    for layer_name,layer in child.named_children():
+        if layer_name.startswith("bn"):
+            layer.affine=False
+            layer.track_running_stats=False
+
+print(basic_block)
+
 
 x = torch.randn(1, 64, 32, 32)
 x = (x - x.min()) / (x.max() - x.min()) 
-x = x * 254 + 1  
+x = x * 2 + 0
 print(x)
 
 # Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
@@ -425,7 +437,9 @@ class TransformerModel(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.stem(x)
+        x=x*1000000
+        # x = self.stem(x)
+
         x = self.layer1(x)
         # x = self.layer2(x)
         # x = self.layer3(x)
@@ -433,7 +447,7 @@ class TransformerModel(nn.Module):
         # x = self.avgpool(x)
         # x = torch.flatten(x, 1)
         # x = self.fc(x)
-        return x
+        return x//1000000
 
 
 
@@ -459,6 +473,9 @@ y = (y - y.min()) / (y.max() - y.min())
 y = y * 254 + 1  
 y = y.to(device)
 # print(y)
+
+
+
 with torch.no_grad():
     out_transformer = model_transformer(y)
     # print("TransformerConvBlock output shape:", out_transformer.shape)
@@ -482,12 +499,15 @@ with torch.no_grad():
 
 # Для out_basic
 mean_basic = torch.abs(out_resnet).mean()
+disp=torch.abs(out_resnet).std()
 print("Среднее значение по модулю для out_resnet:", mean_basic.item())
+print("Дисперсия ",disp)
 
 # Для out_transformer
 mean_transformer = torch.abs(out_transformer).mean()
+disp=torch.abs(out_transformer).std()
 print("Среднее значение по модулю для out_transformer:", mean_transformer.item())
-
+print("Дисперсия ",disp)
 
 # # Функция для оценки точности
 # def evaluate(model, dataloader):
