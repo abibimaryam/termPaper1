@@ -34,7 +34,7 @@ print(resnet_model)
 
 
 
-device = 'cuda'
+device = "cuda"
 seed = 42
 batch_size = 64
 epochs = 50
@@ -288,12 +288,10 @@ basic_block=resnet_model.layer1
 
 x = torch.randn(1, 64, 32, 32)
 x = (x - x.min()) / (x.max() - x.min()) 
-x = x * 0.008 + 1  
+x = x * 0.008 + 0.05  
 print(x)
 
-# Убедимся, что блоки на одном устройстве (если есть CUDA — будет 'cuda')
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-x = x.to(device)
+
 layer = layer.to(device)
 basic_block = basic_block.to(device)
 
