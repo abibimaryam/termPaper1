@@ -23,14 +23,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score
 
-resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
-print(resnet_model)
-
-# # Получаем веса из conv1 и conv2 внутри первого BasicBlock (layer1[0])
-# conv1_weights = model.layer1[0].conv1.weight
-# conv2_weights = model.layer1[0].conv2.weight
-
-
 
 
 
@@ -39,6 +31,12 @@ seed = 42
 batch_size = 64
 epochs = 50
 
+resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
+print(resnet_model)
+
+# # Получаем веса из conv1 и conv2 внутри первого BasicBlock (layer1[0])
+# conv1_weights = model.layer1[0].conv1.weight
+# conv2_weights = model.layer1[0].conv2.weight
 
 
 # Загрузка тренировочного набора
@@ -286,8 +284,8 @@ print(layer)
 
 basic_block=resnet_model.layer1
 
-x = torch.randn(1, 64, 32, 32)
-x = (x - x.min()) / (x.max() - x.min()) 
+x = torch.randn(1, 64, 32, 32).to(device)
+x = (x - x.min()) / (x.max() - x.min())
 x = x * 0.008 + 0.05  
 print(x)
 
@@ -399,8 +397,8 @@ model_resnet=resnet_model.to(device)
 
 
 
-y = torch.randn(1, 3, 32, 32)
-y = (y - y.min()) / (y.max() - y.min()) 
+y = torch.randn(1, 3, 32, 32).to(device)
+y = (y - y.min()) / (y.max() - y.min())
 y = y * 254 + 1  
 y = y.to(device)
 # print(y)
