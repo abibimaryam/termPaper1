@@ -174,12 +174,14 @@ class TransformerConvBlock(nn.Module):
             self.ffn1.weight.data = ffn1_weights
 
     def forward(self, x):
-
+        scale_norm1 = 0.5 * 0.74
+        scale_ffn = 0.3 * 0.74 
+        scale_norm2 = 0.7 * 0.74 
         identity = x
         B, C, H, W = x.shape
         
         # Attention part
-        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)* 0.5  #[B, H, W, C]
+        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)* scale_norm1 #[B, H, W, C]
         x_attn = torch.zeros_like(x_norm)
         
         # Reshape for attention
@@ -216,15 +218,15 @@ class TransformerConvBlock(nn.Module):
         x = x.permute(0, 2, 3, 1) # Shape [B, H, W, out_channels]
 
         # Apply FFN to the last dimension (out_channels)
-        x = self.ffn1(x)*0.3 # Shape [B, H, W, hidden_dim]
+        x = self.ffn1(x)*scale_ffn # Shape [B, H, W, hidden_dim]
         x = F.relu(x)
-        x = self.ffn2(x)*0.3  # Shape [B, H, W, out_channels]
+        x = self.ffn2(x)*scale_ffn # Shape [B, H, W, out_channels]
 
         # Permute back to [B, out_channels, H, W]
         x = x.permute(0, 3, 1, 2)
 
         # Final normalization and residual
-        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *0.7 #[B, out_channels, H, W]
+        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *scale_norm2 #[B, out_channels, H, W]
         x += self.shortcut(identity)
         x = F.relu(x)
         
@@ -294,7 +296,7 @@ basic_block=resnet_model.layer1
 
 x = torch.randn(1, 64, 32, 32).to(device)
 x = (x - x.min()) / (x.max() - x.min())
-x = x * 0.05 + 0.1
+x = x * 5000 + 100
 print(x)
 
 
