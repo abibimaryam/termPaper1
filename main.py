@@ -155,6 +155,10 @@ class TransformerConvBlock(nn.Module):
              )
 
         self._init_weights()
+        self.scale_norm1 = 0.08      # Сохраняем
+        self.scale_attn = 45     # Увеличиваем (было 3.0)
+        self.scale_ffn = 408.1       # Уменьшаем (было 2.5)
+        self.scale_norm2 = 0.01 
         
 
     def _init_weights(self):
@@ -190,14 +194,14 @@ class TransformerConvBlock(nn.Module):
             self.ffn1.weight.data = ffn1_weights
 
     def forward(self, x):
-        scale_norm1 = 0.5 * 0.74
-        scale_ffn = 0.3 * 0.74 
-        scale_norm2 = 0.7 * 0.74 
+
+
         identity = x
         B, C, H, W = x.shape
         
         # Attention part
-        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)* scale_norm1 #[B, H, W, C]
+        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)* self.scale_norm1 #[B, H, W, C]
+        print("After norm1:", x_norm.abs().mean().item())
         x_attn = torch.zeros_like(x_norm)
         
         # Reshape for attention
@@ -223,7 +227,8 @@ class TransformerConvBlock(nn.Module):
         attn_weights = F.softmax(attn_scores.clamp(-20, 20), dim=2) 
         x_attn = torch.einsum('bnmhw,bmhwd->bnhwd', attn_weights, V)
         x_attn = x_attn.permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)  #[B, H, W, num_heads * head_dim]
-        x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2)  #[B, H, W, out_channels]
+        x_attn = torch.matmul(x_attn, self.W_O).permute(0, 3, 1, 2)*self.scale_attn  #[B, H, W, out_channels]
+        print("After attention:", x_attn.abs().mean().item())
         
         # Residual connection
         x = x_norm + x_attn
@@ -234,15 +239,17 @@ class TransformerConvBlock(nn.Module):
         x = x.permute(0, 2, 3, 1) # Shape [B, H, W, out_channels]
 
         # Apply FFN to the last dimension (out_channels)
-        x = self.ffn1(x)*scale_ffn # Shape [B, H, W, hidden_dim]
+        x = self.ffn1(x)*self.scale_ffn # Shape [B, H, W, hidden_dim]
+        print("After FFN1:", x.abs().mean().item())
         x = F.relu(x)
-        x = self.ffn2(x)*scale_ffn # Shape [B, H, W, out_channels]
+        x = self.ffn2(x)*self.scale_ffn # Shape [B, H, W, out_channels]
+        print("After FFN2:", x.abs().mean().item())
 
         # Permute back to [B, out_channels, H, W]
         x = x.permute(0, 3, 1, 2)
 
         # Final normalization and residual
-        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *scale_norm2 #[B, out_channels, H, W]
+        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *self.scale_norm2 #[B, out_channels, H, W]
 
         # Apply spatial reduction to the main path output if stride > 1
         if self.stride != 1:
