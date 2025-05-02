@@ -190,14 +190,12 @@ class TransformerConvBlock(nn.Module):
             self.ffn1.weight.data = ffn1_weights
 
     def forward(self, x):
-        scale_norm1 = 0.5 * 0.74
-        scale_ffn = 0.3 * 0.74 
-        scale_norm2 = 0.7 * 0.74 
+        x=x*100000
         identity = x
         B, C, H, W = x.shape
         
         # Attention part
-        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)* scale_norm1 #[B, H, W, C]
+        x_norm = self.norm1(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)#[B, H, W, C]
         x_attn = torch.zeros_like(x_norm)
         
         # Reshape for attention
@@ -234,15 +232,15 @@ class TransformerConvBlock(nn.Module):
         x = x.permute(0, 2, 3, 1) # Shape [B, H, W, out_channels]
 
         # Apply FFN to the last dimension (out_channels)
-        x = self.ffn1(x)*scale_ffn # Shape [B, H, W, hidden_dim]
+        x = self.ffn1(x)# Shape [B, H, W, hidden_dim]
         x = F.relu(x)
-        x = self.ffn2(x)*scale_ffn # Shape [B, H, W, out_channels]
+        x = self.ffn2(x) # Shape [B, H, W, out_channels]
 
         # Permute back to [B, out_channels, H, W]
         x = x.permute(0, 3, 1, 2)
 
         # Final normalization and residual
-        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *scale_norm2 #[B, out_channels, H, W]
+        x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) #[B, out_channels, H, W]
 
         # Apply spatial reduction to the main path output if stride > 1
         if self.stride != 1:
@@ -252,7 +250,7 @@ class TransformerConvBlock(nn.Module):
         x += self.shortcut(identity)
         x = F.relu(x)
 
-        return x
+        return x/100000
 
 
 layer=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
@@ -318,7 +316,7 @@ basic_block = copy.deepcopy(resnet_model.layer1)
 
 x = torch.randn(1, 64, 32, 32).to(device)
 x = (x - x.min()) / (x.max() - x.min())
-x = x * 254 + 1
+x = x * 0.008 + 0.1
 print(x)
 
 
@@ -406,11 +404,11 @@ class TransformerModel(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.stem(x)
-        x = self.layer1(x)
+        # x = self.stem(x)
+        # x = self.layer1(x)
         x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        # x = self.layer3(x)
+        # x = self.layer4(x)
         # x = self.avgpool(x)
         # x = torch.flatten(x, 1)
         # x = self.fc(x)
@@ -423,14 +421,14 @@ model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
 
 resnet_model = nn.Sequential(
-    resnet_model.conv1,
-    resnet_model.bn1,
-    resnet_model.act1,
-    resnet_model.maxpool,
-    resnet_model.layer1,
+    # resnet_model.conv1,
+    # resnet_model.bn1,
+    # resnet_model.act1,
+    # resnet_model.maxpool,
+    # resnet_model.layer1,
     resnet_model.layer2,
-    resnet_model.layer3,
-    resnet_model.layer4,
+    # resnet_model.layer3,
+    # resnet_model.layer4,
 )
 
 model_resnet=resnet_model.to(device)
@@ -438,24 +436,24 @@ model_resnet=resnet_model.to(device)
 
 
 
-# y = torch.randn(1, 3, 32, 32).to(device)
-# y = (y - y.min()) / (y.max() - y.min())
-# y = y * 254 + 1  
-# y = y.to(device)
+y = torch.randn(1, 64, 32, 32).to(device)
+y = (y - y.min()) / (y.max() - y.min())
+y = y * 254 + 1  
+y = y.to(device)
 
 
-inputs, labels = next(iter(train_loader))
+# inputs, labels = next(iter(train_loader))
 
-# Взять первое изображение и метку
-img = inputs[0].unsqueeze(0).to(device) # [1, C, H, W]
-label = labels[0].to(device)
+# # Взять первое изображение и метку
+# img = inputs[0].unsqueeze(0).to(device) # [1, C, H, W]
+# label = labels[0].to(device)
 
 with torch.no_grad():
-    out_transformer = model_transformer(img)
+    out_transformer = model_transformer(y)
     print(out_transformer.shape)
 
 with torch.no_grad():
-    out_resnet = resnet_model(img)
+    out_resnet = resnet_model(y)
     print(out_resnet.shape)
     
 
