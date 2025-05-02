@@ -253,8 +253,9 @@ class TransformerConvBlock(nn.Module):
         return x/100000
 
 
-layer=TransformerConvBlock(in_channels=64,out_channels=64,stride=1)
-layer.load_conv_weights(resnet_model.layer1[0].conv1, resnet_model.layer1[0].conv2)
+
+layer=TransformerConvBlock(in_channels=64,out_channels=128,stride=2)
+layer.load_conv_weights(resnet_model.layer2[0].conv1, resnet_model.layer2[0].conv2)
 print(layer)
 
 
@@ -312,7 +313,7 @@ print(layer)
 # basic_block=BasicBlockResnet(64, 64,stride=1)
 # print(basic_block)
 
-basic_block = copy.deepcopy(resnet_model.layer1)
+basic_block = copy.deepcopy(resnet_model.layer2[0])
 
 x = torch.randn(1, 64, 32, 32).to(device)
 x = (x - x.min()) / (x.max() - x.min())
