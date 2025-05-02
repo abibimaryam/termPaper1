@@ -385,7 +385,7 @@ class TransformerModel(nn.Module):
         self.layer1 = self.make_layer(resnet.layer1,stride0=1,stride1=1)
         self.layer2 = self.make_layer(resnet.layer2,stride0=2,stride1=1)
         self.layer3 = self.make_layer(resnet.layer3,stride0=2,stride1=1)
-        self.layer4 = self.make_layer(resnet.layer4,stride0=1,stride1=1)
+        self.layer4 = self.make_layer(resnet.layer4,stride0=2,stride1=1)
 
         # Pooling + FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
@@ -409,8 +409,8 @@ class TransformerModel(nn.Module):
         x = self.stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
-        # x = self.layer3(x)
-        # x = self.layer4(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
         # x = self.avgpool(x)
         # x = torch.flatten(x, 1)
         # x = self.fc(x)
@@ -429,6 +429,8 @@ resnet_model = nn.Sequential(
     resnet_model.maxpool,
     resnet_model.layer1,
     resnet_model.layer2,
+    resnet_model.layer3,
+    resnet_model.layer4,
 )
 
 model_resnet=resnet_model.to(device)
