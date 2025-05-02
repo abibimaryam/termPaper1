@@ -23,13 +23,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score
 import math
+import copy
 
 
 
 
 device = "cuda"
 seed = 42
-batch_size = 64
+batch_size = 1
 epochs = 50
 
 resnet_model = timm.create_model("resnet18_cifar100", pretrained=True)
@@ -116,7 +117,8 @@ class TransformerConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, num_heads=8):
         super().__init__()
         self.in_channels = in_channels
-        self.out_channels = out_channels 
+        self.out_channels = out_channels
+        self.stride = stride # Store stride
         self.num_heads = num_heads
 
         assert in_channels % num_heads == 0, "in_channels должно делиться на num_heads"
@@ -139,9 +141,18 @@ class TransformerConvBlock(nn.Module):
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1),
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
                 nn.BatchNorm2d(out_channels)
             )
+
+        # Main path spatial reduction if stride > 1
+        self.main_path_spatial_reduction = nn.Sequential()
+        if stride != 1:
+             # This conv reduces spatial dimensions of the main path output
+             self.main_path_spatial_reduction = nn.Sequential(
+                 nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                 nn.BatchNorm2d(out_channels) # Add BN for consistency with shortcut
+             )
 
         self._init_weights()
         
@@ -153,6 +164,11 @@ class TransformerConvBlock(nn.Module):
         nn.init.xavier_uniform_(self.W_O)
         nn.init.zeros_(self.ffn1.bias)
         nn.init.zeros_(self.ffn2.bias)
+        # Initialize main_path_spatial_reduction if it exists
+        if isinstance(self.main_path_spatial_reduction, nn.Sequential) and len(self.main_path_spatial_reduction) > 0:
+             nn.init.kaiming_normal_(self.main_path_spatial_reduction[0].weight, mode='fan_out', nonlinearity='relu')
+             nn.init.constant_(self.main_path_spatial_reduction[1].weight, 1)
+             nn.init.constant_(self.main_path_spatial_reduction[1].bias, 0)
 
     def load_conv_weights(self, conv1, conv2):
         with torch.no_grad():
@@ -227,9 +243,15 @@ class TransformerConvBlock(nn.Module):
 
         # Final normalization and residual
         x = self.norm2(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) *scale_norm2 #[B, out_channels, H, W]
+
+        # Apply spatial reduction to the main path output if stride > 1
+        if self.stride != 1:
+             x = self.main_path_spatial_reduction(x) # Now x has shape [B, out_channels, H', W']
+
+        # Second residual connection
         x += self.shortcut(identity)
         x = F.relu(x)
-        
+
         return x
 
 
@@ -292,11 +314,11 @@ print(layer)
 # basic_block=BasicBlockResnet(64, 64,stride=1)
 # print(basic_block)
 
-basic_block=resnet_model.layer1
+basic_block = copy.deepcopy(resnet_model.layer1)
 
 x = torch.randn(1, 64, 32, 32).to(device)
 x = (x - x.min()) / (x.max() - x.min())
-x = x * 5000 + 100
+x = x * 254 + 1
 print(x)
 
 
@@ -384,9 +406,9 @@ class TransformerModel(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        # x = self.stem(x)
+        x = self.stem(x)
         x = self.layer1(x)
-        # x = self.layer2(x)
+        x = self.layer2(x)
         # x = self.layer3(x)
         # x = self.layer4(x)
         # x = self.avgpool(x)
@@ -401,11 +423,12 @@ model_transformer = TransformerModel(resnet_model).to(device)
 print(model_transformer)
 
 resnet_model = nn.Sequential(
-    # resnet_model.conv1,
-    # resnet_model.bn1,
-    # resnet_model.act1,
-    # resnet_model.maxpool,
-    resnet_model.layer1
+    resnet_model.conv1,
+    resnet_model.bn1,
+    resnet_model.act1,
+    resnet_model.maxpool,
+    resnet_model.layer1,
+    resnet_model.layer2,
 )
 
 model_resnet=resnet_model.to(device)
@@ -413,25 +436,32 @@ model_resnet=resnet_model.to(device)
 
 
 
-y = torch.randn(1, 3, 32, 32).to(device)
-y = (y - y.min()) / (y.max() - y.min())
-y = y * 254 + 1  
-y = y.to(device)
-# print(y)
-with torch.no_grad():
-    out_transformer = model_transformer(x)
-    # print("TransformerConvBlock output shape:", out_transformer.shape)
+# y = torch.randn(1, 3, 32, 32).to(device)
+# y = (y - y.min()) / (y.max() - y.min())
+# y = y * 254 + 1  
+# y = y.to(device)
+
+
+inputs, labels = next(iter(train_loader))
+
+# Взять первое изображение и метку
+img = inputs[0].unsqueeze(0).to(device) # [1, C, H, W]
+label = labels[0].to(device)
 
 with torch.no_grad():
-    out_resnet = resnet_model(x)
+    out_transformer = model_transformer(img)
+    print(out_transformer.shape)
+
+with torch.no_grad():
+    out_resnet = resnet_model(img)
+    print(out_resnet.shape)
     
 
-# #MAE
-# diff = torch.abs(out_resnet - out_transformer)
-# mean_diff = diff.mean()
-# print(mean_diff)
-
-# print("Средняя разница по модулю:", mean_diff.item())
+#MAE
+diff = torch.abs(out_resnet - out_transformer)
+mean_diff = diff.mean()
+print(mean_diff)
+print("Средняя разница по модулю:", mean_diff.item())
 
 # #MSE
 # squared_diff = torch.pow(out_basic - out_transformer, 2)
